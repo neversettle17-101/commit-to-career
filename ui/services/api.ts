@@ -16,3 +16,9 @@ export async function createRow(payload: { company: string; role: string }) {
   if (!res.ok) throw new Error("Failed to create row")
   return res.json()
 }
+
+export async function approveRow(threadId: string) {
+  const res = await fetch(`${BASE}/rows/${threadId}/approve`, { method: "POST" })
+  if (!res.ok) throw new Error("Failed to approve row")
+  return res.json()
+}

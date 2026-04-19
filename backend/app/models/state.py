@@ -1,23 +1,37 @@
-from typing import TypedDict, List, Optional, Literal
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 
-class Resource(TypedDict):
+
+class Resource(BaseModel):
     name: str
     url: str
     type: Literal["blog", "article", "github", "linkedin"]
 
-class RecruitState(TypedDict):
-    # inputs
+
+class Employee(BaseModel):
+    name: str
+    title: str
+    linkedin_url: str = ""
+
+
+class JobState(BaseModel):
+    # ── Inputs ────────────────────────────────────────────────────────────────
+    thread_id: str
     company: str
     role: str
-    resume_text: str          # loaded once at startup
+    resume_text: str = ""
 
-    # filled in by agents
-    company_overview: str        # what the company does, culture, stage
-    external_links: List[Resource]  # external links for blogs etc 
+    # ── Filled in by agents ───────────────────────────────────────────────────
+    company_overview: str = ""
+    external_links: list[Resource] = Field(default_factory=list)
+    employees: list[Employee] = Field(default_factory=list)
+    message: str = ""
 
-    employees: List[Resource]     # People finder writes this  [ {name, title, linkedin} ]
-    message: str              # Message agent writes this
+    # ── Control flow ──────────────────────────────────────────────────────────
+    # Valid values: pending | researching | finding_people |
+    #               awaiting_review | drafting | done | error
+    status: str = "pending"
+    error: Optional[str] = None
 
-    # control flow
-    status: str               # "researching" | "finding_people" | "drafting" | "awaiting_review" | "done" | "error"
-    error: Optional[str]
+    # Human-in-the-loop gate — set to True by POST /rows/{id}/approve
+    approved: bool = False

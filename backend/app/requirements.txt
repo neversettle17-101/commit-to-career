@@ -1,8 +1,7 @@
-# requirements.txt
-langgraph
-langchain
-langchain-anthropic
-langchain-community
+groq
 tavily-python
 python-dotenv
-langchain-groq
+pydantic
+pypdf
+fastapi
+uvicorn

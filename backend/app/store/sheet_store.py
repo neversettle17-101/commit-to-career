@@ -1,14 +1,28 @@
-# app/store/sheet_store.py
+from typing import Optional
+from backend.app.models.state import JobState
 
-# Before: stored the full row dict
-# After: only tracks thread_ids — graph is the source of truth
-
-_rows: list[str] = []   # just a list of thread_ids
+_store: dict[str, JobState] = {}
 
 
-def add_thread(thread_id: str):
-    _rows.append(thread_id)
+def add_state(state: JobState) -> None:
+    _store[state.thread_id] = state
 
 
-def get_thread_ids() -> list[str]:
-    return _rows
+def update_state(state: JobState) -> None:
+    _store[state.thread_id] = state
+
+
+def get_state(thread_id: str) -> Optional[JobState]:
+    return _store.get(thread_id)
+
+
+def get_all_states() -> list[JobState]:
+    return list(_store.values())
+
+
+def approve(thread_id: str) -> bool:
+    state = _store.get(thread_id)
+    if not state:
+        return False
+    state.approved = True
+    return True

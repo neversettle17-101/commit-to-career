@@ -63,4 +63,4 @@ The user is learning multi-agentic workflows through this project. Key areas of 
 - Communication patterns between agents
 - Performance optimisation of agent pipelines
 
-**Every new feature must have a corresponding entry in `learning.md`** documenting the tech decision made and the concepts behind it, with links to good technical reading.
+**Every new feature must have a corresponding entry in `docs/learning.md`** documenting the tech decision made and the concepts behind it, with links to good technical reading.

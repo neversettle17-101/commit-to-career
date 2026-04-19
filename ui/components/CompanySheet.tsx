@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, ChevronDown, ExternalLink, Copy, Check, Loader2 } from "lucide-react"
-import { fetchRows, createRow } from "@/services/api"
+import { fetchRows, createRow, approveRow } from "@/services/api"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,12 @@ type Resource = {
   type: "blog" | "article" | "github" | "linkedin"
 }
 
+type Employee = {
+  name:         string
+  title:        string
+  linkedin_url: string
+}
+
 type Row = {
   thread_id:        string
   company:          string
@@ -20,20 +26,22 @@ type Row = {
   status:           string
   company_overview: string
   external_links:   Resource[]
-  employees:        Resource[]
+  employees:        Employee[]
   message:          string
   error:            string | null
+  approved:         boolean
 }
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS: Record<string, { label: string; bg: string; text: string; dot: string; pulse: boolean }> = {
-  pending:        { label: "Pending",        bg: "#F5F4F0", text: "#9C9A8E", dot: "#C8C6BC", pulse: false },
-  researching:    { label: "Researching",    bg: "#FEF3E2", text: "#B45309", dot: "#F59E0B", pulse: true  },
-  finding_people: { label: "Finding people", bg: "#FDF2F8", text: "#9D174D", dot: "#EC4899", pulse: true  },
-  drafting:       { label: "Drafting",       bg: "#EFF6FF", text: "#1D4ED8", dot: "#3B82F6", pulse: true  },
-  done:           { label: "Done",           bg: "#F0FDF4", text: "#166534", dot: "#22C55E", pulse: false },
-  error:          { label: "Error",          bg: "#FEF2F2", text: "#991B1B", dot: "#EF4444", pulse: false },
+  pending:         { label: "Pending",          bg: "#F5F4F0", text: "#9C9A8E", dot: "#C8C6BC", pulse: false },
+  researching:     { label: "Researching",      bg: "#FEF3E2", text: "#B45309", dot: "#F59E0B", pulse: true  },
+  finding_people:  { label: "Finding people",   bg: "#FDF2F8", text: "#9D174D", dot: "#EC4899", pulse: true  },
+  awaiting_review: { label: "Awaiting review",  bg: "#F0F9FF", text: "#0369A1", dot: "#38BDF8", pulse: false },
+  drafting:        { label: "Drafting",          bg: "#EFF6FF", text: "#1D4ED8", dot: "#3B82F6", pulse: true  },
+  done:            { label: "Done",              bg: "#F0FDF4", text: "#166534", dot: "#22C55E", pulse: false },
+  error:           { label: "Error",             bg: "#FEF2F2", text: "#991B1B", dot: "#EF4444", pulse: false },
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -95,7 +103,7 @@ function DotLoader() {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-function DetailPanel({ row }: { row: Row }) {
+function DetailPanel({ row, onApprove }: { row: Row; onApprove: () => void }) {
   const generating = ["pending","researching","finding_people","drafting"].includes(row.status)
 
   return (
@@ -155,15 +163,34 @@ function DetailPanel({ row }: { row: Row }) {
                 <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A", marginBottom: 10 }}>People</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {row.employees.map((e, i) => (
-                    <a key={i} href={e.url || "#"} target="_blank" rel="noreferrer"
+                    <a key={i} href={e.linkedin_url || "#"} target="_blank" rel="noreferrer"
                       style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "#57534E", fontSize: 13 }}>
                       <Avatar name={e.name} />
-                      <span style={{ fontWeight: 500 }}>{e.name}</span>
+                      <div>
+                        <span style={{ fontWeight: 500, display: "block" }}>{e.name}</span>
+                        {e.title && <span style={{ fontSize: 11, color: "#A8A29E" }}>{e.title}</span>}
+                      </div>
                     </a>
                   ))}
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Approve gate */}
+        {row.status === "awaiting_review" && (
+          <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 12, padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "#0369A1", margin: "0 0 2px" }}>Ready to draft</p>
+              <p style={{ fontSize: 12, color: "#7DD3FC", margin: 0 }}>Review the research and contacts above, then approve to generate your message.</p>
+            </div>
+            <button
+              onClick={e => { e.stopPropagation(); onApprove() }}
+              style={{ flexShrink: 0, height: 36, padding: "0 20px", borderRadius: 10, border: "none", background: "#0369A1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            >
+              Approve →
+            </button>
           </div>
         )}
 
@@ -201,6 +228,15 @@ export default function CompanySheet() {
   const [role,       setRole]       = useState("")
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [adding,     setAdding]     = useState(false)
+  const [approving,  setApproving]  = useState<string | null>(null)
+
+  async function handleApprove(threadId: string) {
+    setApproving(threadId)
+    try {
+      await approveRow(threadId)
+      await loadRows()
+    } finally { setApproving(null) }
+  }
 
   useEffect(() => {
     loadRows()
@@ -311,9 +347,11 @@ export default function CompanySheet() {
                     <span style={{ fontSize: 13, color: "#A8A29E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {row.message
                         ? row.message.slice(0, 72) + "…"
-                        : ["researching","finding_people","drafting"].includes(row.status)
-                          ? <span style={{ fontStyle: "italic", color: "#C4B89A", fontSize: 12 }}>generating…</span>
-                          : <span style={{ color: "#D6D0C8" }}>—</span>
+                        : row.status === "awaiting_review"
+                          ? <span style={{ fontStyle: "italic", color: "#38BDF8", fontSize: 12 }}>awaiting your approval…</span>
+                          : ["researching","finding_people","drafting"].includes(row.status)
+                            ? <span style={{ fontStyle: "italic", color: "#C4B89A", fontSize: 12 }}>generating…</span>
+                            : <span style={{ color: "#D6D0C8" }}>—</span>
                       }
                     </span>
                     <motion.div animate={{ rotate: expandedId === row.thread_id ? 180 : 0 }} transition={{ duration: 0.18 }}
@@ -324,7 +362,9 @@ export default function CompanySheet() {
 
                   {/* Expanded */}
                   <AnimatePresence>
-                    {expandedId === row.thread_id && <DetailPanel row={row} />}
+                    {expandedId === row.thread_id && (
+                      <DetailPanel row={row} onApprove={() => handleApprove(row.thread_id)} />
+                    )}
                   </AnimatePresence>
                 </motion.div>
               ))}

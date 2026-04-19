@@ -1,13 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import threading
-from backend.app.graph import recruiter_graph
+from dotenv import load_dotenv
 from backend.app.api.routes import router
 
+load_dotenv()
 
 app = FastAPI()
-
-# Allow frontend access
 
 app.add_middleware(
     CORSMiddleware,
