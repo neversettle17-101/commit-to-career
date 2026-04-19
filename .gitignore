@@ -10,25 +10,16 @@ backend/venv/
 .mypy_cache/
 .ruff_cache/
 
-CLAUDE.md
-
-# Node
-node_modules/
-.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# Next.js
-.next/
-out/
-build/
-coverage/
-*.tsbuildinfo
-next-env.d.ts
+# Node / Next.js (scoped to ui/)
+ui/node_modules/
+ui/.next/
+ui/out/
+ui/build/
+ui/coverage/
+ui/*.tsbuildinfo
+ui/next-env.d.ts
+ui/.pnp
+ui/.pnp.*
 
 # Env
 .env
@@ -47,7 +38,6 @@ yarn-error.log*
 *.pem
 .vercel
 
-# Boilerplate (not business logic)
+# Boilerplate
 ui/public/*.svg
 ui/README.md
-ui/.git/
