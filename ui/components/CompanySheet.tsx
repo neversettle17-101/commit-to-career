@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, ChevronDown, ExternalLink, Copy, Check, Loader2 } from "lucide-react"
-import { fetchRows, createRow, approveRow } from "@/services/api"
+import { fetchRows, createRow, approveRow, sendEmail } from "@/services/api"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -37,21 +37,28 @@ type Row = {
   external_links:   Resource[]
   employees:        Employee[]
   message:          string
+  contact_email:    string
   error:            string | null
   approved:         boolean
+  send_approved:    boolean
   trace:            TraceEvent[]
 }
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS: Record<string, { label: string; bg: string; text: string; dot: string; pulse: boolean }> = {
-  pending:         { label: "Pending",          bg: "#F5F4F0", text: "#9C9A8E", dot: "#C8C6BC", pulse: false },
-  researching:     { label: "Researching",      bg: "#FEF3E2", text: "#B45309", dot: "#F59E0B", pulse: true  },
-  finding_people:  { label: "Finding people",   bg: "#FDF2F8", text: "#9D174D", dot: "#EC4899", pulse: true  },
-  awaiting_review: { label: "Awaiting review",  bg: "#F0F9FF", text: "#0369A1", dot: "#38BDF8", pulse: false },
-  drafting:        { label: "Drafting",          bg: "#EFF6FF", text: "#1D4ED8", dot: "#3B82F6", pulse: true  },
-  done:            { label: "Done",              bg: "#F0FDF4", text: "#166534", dot: "#22C55E", pulse: false },
-  error:           { label: "Error",             bg: "#FEF2F2", text: "#991B1B", dot: "#EF4444", pulse: false },
+  pending:                 { label: "Pending",               bg: "#F5F4F0", text: "#9C9A8E", dot: "#C8C6BC", pulse: false },
+  researching:             { label: "Researching",           bg: "#FEF3E2", text: "#B45309", dot: "#F59E0B", pulse: true  },
+  finding_people:          { label: "Finding people",        bg: "#FDF2F8", text: "#9D174D", dot: "#EC4899", pulse: true  },
+  awaiting_review:         { label: "Awaiting review",       bg: "#F0F9FF", text: "#0369A1", dot: "#38BDF8", pulse: false },
+  drafting:                { label: "Drafting",               bg: "#EFF6FF", text: "#1D4ED8", dot: "#3B82F6", pulse: true  },
+  finding_email:           { label: "Finding email",         bg: "#FAF5FF", text: "#6D28D9", dot: "#A78BFA", pulse: true  },
+  awaiting_send_approval:  { label: "Ready to send",         bg: "#FFFBEB", text: "#92400E", dot: "#F59E0B", pulse: false },
+  sending:                 { label: "Sending",               bg: "#EFF6FF", text: "#1D4ED8", dot: "#3B82F6", pulse: true  },
+  sent:                    { label: "Sent",                  bg: "#F0FDF4", text: "#166534", dot: "#22C55E", pulse: false },
+  send_failed:             { label: "Send failed",           bg: "#FEF2F2", text: "#991B1B", dot: "#EF4444", pulse: false },
+  done:                    { label: "Done",                  bg: "#F0FDF4", text: "#166534", dot: "#22C55E", pulse: false },
+  error:                   { label: "Error",                 bg: "#FEF2F2", text: "#991B1B", dot: "#EF4444", pulse: false },
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -152,8 +159,9 @@ function TracePanel({ events }: { events: TraceEvent[] }) {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-function DetailPanel({ row, onApprove }: { row: Row; onApprove: () => void }) {
-  const generating = ["pending","researching","finding_people","drafting"].includes(row.status)
+function DetailPanel({ row, onApprove, onSend }: { row: Row; onApprove: () => void; onSend: (email: string) => void }) {
+  const generating = ["pending","researching","finding_people","drafting","finding_email"].includes(row.status)
+  const [emailOverride, setEmailOverride] = useState(row.contact_email || "")
 
   return (
     <motion.div
@@ -277,11 +285,50 @@ function DetailPanel({ row, onApprove }: { row: Row; onApprove: () => void }) {
           </div>
         )}
 
-        {/* Drafting in progress */}
+        {/* Drafting / finding email in progress */}
         {!row.message && !row.error && row.company_overview && generating && (
           <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
             <DotLoader />
-            <span style={{ fontSize: 13, color: "#92400E" }}>Drafting your message…</span>
+            <span style={{ fontSize: 13, color: "#92400E" }}>
+              {row.status === "finding_email" ? "Looking up email address…" : "Drafting your message…"}
+            </span>
+          </div>
+        )}
+
+        {/* Send panel */}
+        {row.status === "awaiting_send_approval" && (
+          <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "20px", marginTop: 16 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A", margin: "0 0 12px" }}>Send email</p>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#78716C", marginBottom: 6 }}>
+                {row.contact_email ? "Email found by Hunter.io — confirm or edit:" : "Email not found — enter manually:"}
+              </label>
+              <input
+                type="email"
+                value={emailOverride}
+                onChange={e => setEmailOverride(e.target.value)}
+                placeholder="contact@company.com"
+                style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: 10, border: "1.5px solid #E8E2D9", background: "#fff", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }}
+                onFocus={e  => e.currentTarget.style.borderColor = "#F59E0B"}
+                onBlur={e   => e.currentTarget.style.borderColor = "#E8E2D9"}
+              />
+            </div>
+
+            <button
+              onClick={e => { e.stopPropagation(); onSend(emailOverride) }}
+              disabled={!emailOverride}
+              style={{ height: 38, padding: "0 20px", borderRadius: 10, border: "none", background: emailOverride ? "#1C1917" : "#E8E2D9", color: emailOverride ? "#fff" : "#A8A29E", fontSize: 13, fontWeight: 600, cursor: emailOverride ? "pointer" : "not-allowed", transition: "all 0.15s" }}
+            >
+              Send →
+            </button>
+          </div>
+        )}
+
+        {/* Sent confirmation */}
+        {row.status === "sent" && (
+          <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#166534", marginTop: 8 }}>
+            ✓ Email sent to {row.contact_email}
           </div>
         )}
 
@@ -309,6 +356,15 @@ export default function CompanySheet() {
       await approveRow(threadId)
       await loadRows()
     } finally { setApproving(null) }
+  }
+
+  const [sending, setSending] = useState<string | null>(null)
+  async function handleSend(threadId: string, email: string) {
+    setSending(threadId)
+    try {
+      await sendEmail(threadId, email)
+      await loadRows()
+    } finally { setSending(null) }
   }
 
   useEffect(() => {
@@ -436,7 +492,7 @@ export default function CompanySheet() {
                   {/* Expanded */}
                   <AnimatePresence>
                     {expandedId === row.thread_id && (
-                      <DetailPanel row={row} onApprove={() => handleApprove(row.thread_id)} />
+                      <DetailPanel row={row} onApprove={() => handleApprove(row.thread_id)} onSend={(email) => handleSend(row.thread_id, email)} />
                     )}
                   </AnimatePresence>
                 </motion.div>

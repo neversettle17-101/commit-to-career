@@ -348,3 +348,29 @@ Using `asyncio.sleep` in async code and `time.sleep` in sync code is not just st
 - Blog: [Exponential Backoff and Jitter — AWS Architecture Blog](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/) — the canonical reference, written by AWS engineers who deal with this at scale
 - Docs: [Python asyncio — sleep](https://docs.python.org/3/library/asyncio-task.html#asyncio.sleep) — why `asyncio.sleep` is non-blocking
 - Blog: [Retry patterns — Microsoft Azure Architecture](https://learn.microsoft.com/en-us/azure/architecture/patterns/retry) — retry, circuit breaker, and when to use each
+
+---
+
+## 17. Irreversible Actions as HITL Gates — When to Pause a Pipeline
+
+**The principle:** Not all actions in a pipeline deserve the same treatment. Some are reversible (drafting a message — you can redraft), some are irreversible (sending an email — you can't unsend). A human-in-the-loop gate belongs in front of irreversible side effects.
+
+**In this project:**
+- Drafting → no gate (you can always regenerate)
+- Sending → HITL gate (`awaiting_send_approval`) + editable email field
+
+**The pattern for identifying where to put HITL gates:**
+1. Is the action observable by someone outside the system? (email arrives in someone's inbox)
+2. Can it be undone? (no)
+3. Does it cost something? (reputation, Hunter.io credits, Resend quota)
+If yes to any: pause and ask.
+
+**Implementation detail:** The `send_approved` flag follows the same polling pattern as `approved`. Two separate flags, not one — because approval for research review and approval for sending are semantically different decisions. Merging them into one flag would lose that distinction.
+
+**The editable email field:** Hunter.io doesn't always find an email. Rather than blocking the send entirely, the UI allows the user to enter it manually. The API accepts `?contact_email=` as an override. This is the "graceful degradation" pattern — the happy path (Hunter finds the email) is automatic, the fallback (user provides it) keeps the feature usable.
+
+**Interview talking point:** "Where do you put human-in-the-loop gates?" → In front of irreversible or high-cost actions. Before anything that touches the external world (email, Slack, API writes). Never before internal transformations (summarising, drafting, classifying) — those should run automatically.
+
+**Concepts to read:**
+- Blog: [Building effective agents — Anthropic: human-in-the-loop](https://www.anthropic.com/research/building-effective-agents#human-in-the-loop)
+- Blog: [Agentic patterns: when to involve humans — Eugene Yan](https://eugeneyan.com/writing/agentic/)

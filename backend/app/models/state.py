@@ -55,9 +55,14 @@ class JobState(BaseModel):
     # ── Observability ─────────────────────────────────────────────────────────
     trace: list[TraceEvent] = Field(default_factory=list)
 
+    # ── Outreach ──────────────────────────────────────────────────────────────
+    contact_email: str = ""     # found by Hunter.io; editable by user before send
+    send_approved: bool = False # set by POST /rows/{id}/send
+
     # ── Control flow ──────────────────────────────────────────────────────────
-    # Valid values: pending | researching | finding_people |
-    #               awaiting_review | drafting | done | error
+    # Valid values: pending | researching | drafting |
+    #               finding_email | awaiting_send_approval | sending | sent |
+    #               send_failed | error
     status: str = "pending"
     error: Optional[str] = None
 

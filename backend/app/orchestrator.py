@@ -8,6 +8,8 @@ from backend.app.store.sheet_store import update_state, get_state
 from backend.app.agents.researcher import researcher
 from backend.app.agents.people import people_finder
 from backend.app.agents.drafter import drafter
+from backend.app.services.hunter import find_email
+from backend.app.services.resend_client import send_email
 
 load_dotenv()
 
@@ -20,6 +22,18 @@ def load_resume() -> str:
     except FileNotFoundError:
         print("[orchestrator] no resume uploaded yet, continuing without it")
         return ""
+
+
+def _extract_domain(state: JobState, contact: Employee) -> str:
+    """Try JD URL first, fall back to company name heuristic."""
+    jd = next((r for r in state.external_links if r.type == "jd"), None)
+    if jd and jd.url:
+        from urllib.parse import urlparse
+        host = urlparse(jd.url).netloc
+        # strip www. and return bare domain
+        return host.removeprefix("www.") if host else ""
+    # heuristic: "Stripe Inc" → "stripe.com"
+    return state.company.lower().split()[0] + ".com"
 
 
 def _parse_json(text: str) -> any:
@@ -130,9 +144,51 @@ My resume:
 
     try:
         state.message = await drafter.run(draft_prompt, trace=state.trace)
-        state.status = "done"
     except Exception as e:
         state.status = "error"
+        state.error = str(e)
+        update_state(state)
+        return
+
+    # ── Email lookup (Hunter.io) ─────────────────────────────────────────────
+    state.status = "finding_email"
+    update_state(state)
+
+    domain = _extract_domain(state, top_contact)
+    parts  = top_contact.name.strip().split(" ", 1)
+    first  = parts[0]
+    last   = parts[1] if len(parts) > 1 else ""
+    state.contact_email = find_email(first, last, domain)
+
+    # ── HITL gate: review email + message before sending ────────────────────
+    # Sending is irreversible — always require explicit user approval.
+    state.status = "awaiting_send_approval"
+    update_state(state)
+    print(f"[orchestrator] waiting for send approval on thread {state.thread_id}")
+
+    while True:
+        await asyncio.sleep(2)
+        current = get_state(state.thread_id)
+        if current is None:
+            return
+        if current.send_approved:
+            state = current
+            break
+
+    # ── Send via Resend ──────────────────────────────────────────────────────
+    state.status = "sending"
+    update_state(state)
+
+    try:
+        send_email(
+            to=state.contact_email,
+            subject=f"Reaching out — {state.role} at {state.company}",
+            body=state.message,
+        )
+        state.status = "sent"
+        state.tags = list(set(state.tags + ["email_sent"]))
+    except Exception as e:
+        state.status = "send_failed"
         state.error = str(e)
 
     update_state(state)
