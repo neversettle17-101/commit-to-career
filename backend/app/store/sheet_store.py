@@ -39,3 +39,15 @@ def approve(thread_id: str) -> bool:
     state.approved = True
     _upsert(state)
     return True
+
+
+def set_send_approved(thread_id: str, contact_email: str = "") -> bool:
+    raw = get_job(thread_id)
+    if not raw:
+        return False
+    state = JobState.model_validate_json(raw)
+    state.send_approved = True
+    if contact_email:
+        state.contact_email = contact_email  # allow user to override the found email
+    _upsert(state)
+    return True

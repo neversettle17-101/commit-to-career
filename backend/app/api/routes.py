@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
 
 from backend.app.models.state import JobState
-from backend.app.store.sheet_store import add_state, get_all_states, approve
+from backend.app.store.sheet_store import add_state, get_all_states, approve, set_send_approved
 from backend.app.store.profile_store import get_profile, update_profile, RESUME_PATH
 from backend.app.orchestrator import run_pipeline
 from pydantic import BaseModel
@@ -29,6 +29,17 @@ async def create_row(req: CreateRowRequest, background_tasks: BackgroundTasks):
 @router.get("/rows")
 def fetch_rows():
     return [s.model_dump() for s in get_all_states()]
+
+
+@router.post("/rows/{thread_id}/send")
+def send_row(thread_id: str, contact_email: str = ""):
+    """
+    HITL gate 2 — user reviewed the email address and drafted message, now approves the send.
+    Optional contact_email allows the user to override the Hunter.io result.
+    """
+    if not set_send_approved(thread_id, contact_email=contact_email):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"thread_id": thread_id, "send_approved": True}
 
 
 @router.post("/rows/{thread_id}/approve")

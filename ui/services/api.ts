@@ -23,6 +23,13 @@ export async function approveRow(threadId: string) {
   return res.json()
 }
 
+export async function sendEmail(threadId: string, contactEmail?: string) {
+  const params = contactEmail ? `?contact_email=${encodeURIComponent(contactEmail)}` : ""
+  const res = await fetch(`${BASE}/rows/${threadId}/send${params}`, { method: "POST" })
+  if (!res.ok) throw new Error("Failed to send email")
+  return res.json()
+}
+
 export async function fetchProfile() {
   const res = await fetch(`${BASE}/profile`)
   if (!res.ok) throw new Error("Failed to fetch profile")
