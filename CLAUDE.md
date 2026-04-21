@@ -55,12 +55,3 @@ Single-page app. `app/page.tsx` renders only `CompanySheet.tsx`, which is a larg
 API client lives in `services/api.ts` with two functions (`createRow`, `fetchRows`) pointing to `http://localhost:8000`.
 
 shadcn/ui components in `components/ui/` use Radix primitives + Tailwind CSS v4 with CSS variables (Nova style, configured in `components.json`).
-
-## Learning Goals
-
-The user is learning multi-agentic workflows through this project. Key areas of focus:
-- How agents manage and share state
-- Communication patterns between agents
-- Performance optimisation of agent pipelines
-
-**Every new feature must have a corresponding entry in `docs/learning.md`** documenting the tech decision made and the concepts behind it, with links to good technical reading.

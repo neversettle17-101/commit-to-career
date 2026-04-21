@@ -8,15 +8,17 @@ import { fetchRows, createRow, approveRow } from "@/services/api"
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Resource = {
-  name: string
-  url:  string
-  type: "blog" | "article" | "github" | "linkedin"
+  name:     string
+  url:      string
+  type:     "blog" | "article" | "github" | "linkedin" | "jd"
+  content?: string
 }
 
 type Employee = {
   name:         string
   title:        string
   linkedin_url: string
+  warm?:        boolean
 }
 
 type Row = {
@@ -166,10 +168,15 @@ function DetailPanel({ row, onApprove }: { row: Row; onApprove: () => void }) {
                     <a key={i} href={e.linkedin_url || "#"} target="_blank" rel="noreferrer"
                       style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "#57534E", fontSize: 13 }}>
                       <Avatar name={e.name} />
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <span style={{ fontWeight: 500, display: "block" }}>{e.name}</span>
                         {e.title && <span style={{ fontSize: 11, color: "#A8A29E" }}>{e.title}</span>}
                       </div>
+                      {e.warm && (
+                        <span style={{ fontSize: 10, fontWeight: 700, background: "#FEF3C7", color: "#92400E", padding: "2px 8px", borderRadius: 999, flexShrink: 0 }}>
+                          Warm
+                        </span>
+                      )}
                     </a>
                   ))}
                 </div>
@@ -177,6 +184,22 @@ function DetailPanel({ row, onApprove }: { row: Row; onApprove: () => void }) {
             )}
           </div>
         )}
+
+        {/* Job posting link */}
+        {(() => {
+          const jd = row.external_links?.find(l => l.type === "jd")
+          if (!jd) return null
+          return (
+            <div style={{ marginBottom: 24 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A", marginBottom: 10 }}>Job posting</p>
+              <a href={jd.url} target="_blank" rel="noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#D97706", textDecoration: "none", fontWeight: 500 }}>
+                <ExternalLink size={13} />
+                {jd.name}
+              </a>
+            </div>
+          )
+        })()}
 
         {/* Approve gate */}
         {row.status === "awaiting_review" && (

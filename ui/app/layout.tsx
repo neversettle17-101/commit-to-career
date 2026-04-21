@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "AI recruiter outreach tool",
 }
 
+import Nav from "@/components/Nav"
+
 export default function RootLayout({
   children,
 }: {
@@ -22,7 +24,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body style={{ margin: 0, background: "#FAF8F5" }}>
+        <Nav />
+        {children}
+      </body>
     </html>
   )
 }

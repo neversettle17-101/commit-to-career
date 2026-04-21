@@ -41,3 +41,5 @@ yarn-error.log*
 # Boilerplate
 ui/public/*.svg
 ui/README.md
+
+CLAUDE.local.md

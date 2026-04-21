@@ -5,13 +5,24 @@ from typing import Literal, Optional
 class Resource(BaseModel):
     name: str
     url: str
-    type: Literal["blog", "article", "github", "linkedin"]
+    type: Literal["blog", "article", "github", "linkedin", "jd"]
+    content: Optional[str] = None  # full text for jd type; None for regular links
+
+
+class UserProfile(BaseModel):
+    name: str = ""
+    email: str = ""
+    title: str = ""
+    location: str = ""
+    previous_company: str = ""
+    university: str = ""
 
 
 class Employee(BaseModel):
     name: str
     title: str
     linkedin_url: str = ""
+    warm: bool = False
 
 
 class JobState(BaseModel):
@@ -21,11 +32,18 @@ class JobState(BaseModel):
     role: str
     resume_text: str = ""
 
+    # ── User profile snapshot (copied from profile store at pipeline start) ───
+    profile: UserProfile = Field(default_factory=UserProfile)
+
     # ── Filled in by agents ───────────────────────────────────────────────────
     company_overview: str = ""
     external_links: list[Resource] = Field(default_factory=list)
     employees: list[Employee] = Field(default_factory=list)
     message: str = ""
+
+    # ── Tags (queryable via Postgres GIN index) ───────────────────────────────
+    # e.g. ["message_sent", "interview_scheduled", "fintech", "rejected"]
+    tags: list[str] = Field(default_factory=list)
 
     # ── Control flow ──────────────────────────────────────────────────────────
     # Valid values: pending | researching | finding_people |

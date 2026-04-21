@@ -121,6 +121,28 @@ This is what every agent framework (CrewAI, LangGraph, AutoGen) hides inside its
 
 ---
 
+## 10. What Belongs in State vs. What Belongs in a Store
+
+**Question:** Should user profile data (name, email, title, location) live in `JobState` or be read directly from `profile_store` by agents?
+
+**Decision:** Copy profile fields into `JobState` as inputs at the start of `run_pipeline`. State becomes a complete snapshot of everything that pipeline run had access to.
+
+**Why Option A (copy into state) beats Option B (read store directly):**
+
+- **Self-contained:** Any `JobState` snapshot tells you exactly what every agent saw — no need to cross-reference external stores
+- **Reproducible:** If the user updates their profile mid-run, the current run is unaffected — it was captured at start time
+- **No hidden dependencies:** Agents get all context from state. If an agent needs the user's name, it's in state — not in a side-channel call to a store it shouldn't know about
+- **Debuggable:** When something goes wrong, you inspect one object and have the full picture
+
+**The rule:** Data that is *static for the duration of a run* gets copied into state as an input. Data that is *produced during the run* gets written into state by agents. Neither should reach outside state to fetch context mid-pipeline.
+
+**Concepts to read:**
+- Blog: [Designing data-intensive applications — event sourcing](https://martin.kleppmann.com/2020/07/06/crdt-hard-parts-hydra.html) — the broader principle of snapshots vs. live reads
+- Blog: [The Twelve-Factor App — config](https://12factor.net/config) — the principle of capturing configuration at startup
+- [LangGraph state management](https://langchain-ai.github.io/langgraph/concepts/low_level/#state) — how a framework formalises exactly this pattern
+
+---
+
 ## 9. Orchestrator as Plain Code, Not an Agent
 
 **Decision:** `orchestrator.py` is a plain Python async function — not an Agent. Agents handle tasks that require judgment. The orchestrator handles sequencing that requires determinism.
@@ -130,3 +152,108 @@ This is what every agent framework (CrewAI, LangGraph, AutoGen) hides inside its
 **Concepts to read:**
 - Blog: [Agentic design patterns — Anthropic](https://www.anthropic.com/research/building-effective-agents#workflows-vs-agents) — the exact distinction between workflows and agents
 - Blog: [When NOT to use an agent](https://hamel.dev/blog/posts/agent/) — Hamel Husain on over-agentification
+
+---
+
+## 10. Nested State Models — Avoiding Schema Bloat
+
+**Decision:** Introduced `UserProfile` as a sub-model inside `JobState`, replacing the previous flat `user_name`, `user_email`, `user_title`, `user_location` fields.
+
+**Why:** Flat state schemas accumulate a new field for every feature. The problem compounds: adding `previous_company` and `university` would mean two more top-level fields in `JobState`, with no grouping signal. Instead, a `UserProfile` domain object groups all user data — adding a new profile field means updating `UserProfile` only. `JobState` stays stable.
+
+This is the same principle that frameworks like LangGraph formalise with typed state channels: the pipeline envelope (what the orchestrator controls) is separate from the domain objects (what agents produce or consume).
+
+**The rule:** If a set of fields always moves together and belongs to the same concern, they belong in a sub-model. `JobState` should read like a pipeline manifest, not a database row.
+
+**Concepts to read:**
+- [Pydantic nested models](https://docs.pydantic.dev/latest/concepts/models/#nested-models)
+- Blog: [Domain-Driven Design — Value Objects](https://martinfowler.com/bliki/ValueObject.html) — Martin Fowler on grouping by concept, not by proximity
+
+---
+
+## 11. Warm Contact Discovery — Personalising Agent Search via Prompt Context
+
+**Decision:** Rather than a separate agent or API, the PeopleAgent runs additional targeted LinkedIn searches using the user's `previous_company` and `university` from their profile, and tags results `warm: true`.
+
+**Why:** Warm contacts (people who share your alma mater or previous employer) respond to outreach at significantly higher rates. The key insight is that *agent behaviour changes through the prompt, not the loop*. The same tool (`web_search`), the same loop, the same agent class — different inputs produce different, personalised results.
+
+Tagging with `warm: bool` at the agent output level keeps the metadata close to the data. Downstream code (UI, future outreach step) can branch on it without re-running searches.
+
+**The rule:** Enrich agent prompts with user context. Tag results with metadata at the source. Don't re-derive metadata downstream.
+
+**Concepts to read:**
+- Blog: [Prompt engineering for agentic tasks](https://www.anthropic.com/research/building-effective-agents#prompt-engineering-for-agentic-systems) — Anthropic on how prompts drive agent behaviour
+- [LinkedIn search operators](https://www.linkedin.com/help/linkedin/answer/a524335) — how site:linkedin.com searches work
+
+---
+
+## 12. Workflow vs. Agentic System — What Is This Project?
+
+**Question:** Is this project a workflow or an agentic system?
+
+**Answer:** It's a workflow that contains agents — and the distinction matters.
+
+**The orchestrator is a workflow.** The control flow is fixed in code: load resume → research + people in parallel → wait for approval → draft. No LLM decides that sequence; `orchestrator.py` does.
+
+**The individual nodes are agents.** Inside each node, an LLM exercises judgment — it decides how many searches to run, what queries to use, whether results are good enough. That autonomy within a bounded task is what makes them agents.
+
+**The rule:** Use agents for tasks where the *how* requires judgment. Use code for tasks where the *what* is already decided. The orchestrator always knows what to do next. The agents figure out how to do their individual task.
+
+A fully agentic system would have an LLM deciding the control flow too — e.g. "should I research more before finding people?" — which introduces non-determinism where you often don't want it. For job outreach, the sequence is well-understood, so a workflow is the right call.
+
+**Concepts to read:**
+- Blog: [Building effective agents — Anthropic](https://www.anthropic.com/research/building-effective-agents#workflows-vs-agents) — the canonical definition of workflows vs. agents
+- Blog: [When NOT to use an agent](https://hamel.dev/blog/posts/agent/) — Hamel Husain on over-agentification
+
+---
+
+## 14. Store Persistence — Interface Abstraction over SQLite
+
+**Decision:** Replaced the in-memory `_store: dict` in `sheet_store.py` and the global `_profile` variable in `profile_store.py` with a SQLite-backed store via a new `db.py` module.
+
+**Why:** All job state was lost on every backend restart. A 60-second pipeline running in the background would produce results that vanished the moment you hit Ctrl+C. The fix: write state to disk after every mutation.
+
+**The key pattern — interface abstraction:** The public API of both stores (`add_state`, `update_state`, `get_state`, `get_all_states`, `approve`) did not change. Only the *implementation* changed. The orchestrator and routes have zero awareness that the backing store switched from a dict to a database. This is the "ports and adapters" (hexagonal architecture) pattern — consumers depend on an interface, not on an implementation.
+
+**Why SQLite over Postgres/Redis:** Zero infrastructure cost. Zero new dependencies — `sqlite3` is in Python's standard library. The workload is trivially low concurrency (one pipeline per background task). When the workload outgrows SQLite, the swap to Postgres is one file change (`db.py`) because the interface is isolated.
+
+**How it works:**
+- `db.py` owns the SQLite connection with a `threading.Lock` for thread safety (FastAPI runs handlers on a thread pool)
+- `JobState` is serialised to/from JSON using Pydantic's `model_dump_json()` / `model_validate_json()` — the store never deserialises manually
+- The `profiles` table uses a single-row constraint (`CHECK (id = 1)`) with `ON CONFLICT DO UPDATE` — a simple "singleton row" pattern for global config
+
+**The rule:** Define a store interface first. Make the implementation a detail behind it. This is the decision that lets you write "swap to Postgres = one file change" with confidence in an interview.
+
+**Concepts to read:**
+- Blog: [Hexagonal Architecture — Alistair Cockburn](https://alistair.cockburn.us/hexagonal-architecture/) — the original paper on ports and adapters
+- Blog: [Designing Data-Intensive Applications — storage engines](https://dataintensive.net/) — Chapter 3 explains why SQLite is the right choice for embedded, low-concurrency workloads
+- [Python sqlite3 docs](https://docs.python.org/3/library/sqlite3.html) — especially threading and connection modes
+- Blog: [Parse, don't validate — Alexis King](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) — why Pydantic's `model_validate_json` is the right deserialisation primitive
+
+---
+
+## 13. Pure Agent Strategy — An Alternative to Prescribed Search Order
+
+**Current approach (structured agent):** System prompts prescribe the search order explicitly — "First call: X, Second call: Y." The LLM executes a recipe, not a plan.
+
+**Pure agent approach:** Give the agent a goal and tools, no script:
+> "Your goal is to find hiring contacts at [company]. You have `web_search`. Use it however many times you need to build a confident list."
+
+The LLM then plans its own strategy — it might search LinkedIn, see sparse results, pivot to GitHub to find engineers, cross-reference with a blog post. That's genuine planning, not recipe-following.
+
+**What you'd change in code:** Strip the numbered search instructions from the system prompts in `agents/people.py` and `agents/researcher.py`. Replace with a goal statement and success criteria. The agent loop in `core/agent.py` requires zero changes — the loop already supports arbitrary tool call sequences.
+
+**The tradeoff:**
+
+| | Structured (current) | Pure agent |
+|---|---|---|
+| Predictability | High — fixed search count | Variable — LLM decides |
+| Quality | Consistent but rigid | Adaptive, but model-dependent |
+| Debuggability | Easy — trace is predictable | Must read full message history |
+| Token cost | Fixed | Variable |
+
+**The constraint:** Pure agent planning works well with frontier models (Claude, GPT-4o). With a mid-tier model like Llama 3.3 on Groq, removing scaffolding can cause looping or missed searches. To do this properly: switch to a stronger model and drop the prescribed order entirely.
+
+**Concepts to read:**
+- Blog: [ReAct — Reasoning + Acting in LLMs](https://react-lm.github.io/) — the original paper on agents that plan their own tool-use steps
+- Blog: [Building effective agents — Anthropic](https://www.anthropic.com/research/building-effective-agents#agents) — when to use fully autonomous agents vs. structured workflows

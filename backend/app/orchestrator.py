@@ -3,7 +3,7 @@ import json
 import re
 from dotenv import load_dotenv
 
-from backend.app.models.state import JobState, Resource, Employee
+from backend.app.models.state import JobState, Resource, Employee, UserProfile
 from backend.app.store.sheet_store import update_state, get_state
 from backend.app.agents.researcher import researcher
 from backend.app.agents.people import people_finder
@@ -11,16 +11,14 @@ from backend.app.agents.drafter import drafter
 
 load_dotenv()
 
-RESUME_PATH = "resume.pdf"
-
-
 def load_resume() -> str:
     from pypdf import PdfReader
+    from backend.app.store.profile_store import RESUME_PATH
     try:
         reader = PdfReader(RESUME_PATH)
         return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
     except FileNotFoundError:
-        print(f"[orchestrator] resume not found at {RESUME_PATH}, continuing without it")
+        print("[orchestrator] no resume uploaded yet, continuing without it")
         return ""
 
 
@@ -40,6 +38,20 @@ async def run_pipeline(state: JobState) -> None:
     # Resume must be loaded before any agent runs — it's a hard dependency.
     # Sequential = one thing at a time, each step feeds the next.
     print(f"[orchestrator] starting pipeline for {state.company}")
+
+    # Snapshot profile into state — agents read from state, not from the store.
+    # UserProfile is a domain object; JobState is the pipeline envelope.
+    # Adding new profile fields only requires updating UserProfile, not JobState.
+    from backend.app.store.profile_store import get_profile
+    p = get_profile()
+    state.profile = UserProfile(
+        name=p.name,
+        email=p.email,
+        title=p.title,
+        location=p.location,
+        previous_company=p.previous_company,
+        university=p.university,
+    )
     state.resume_text = load_resume()
     state.status = "researching"
     update_state(state)
@@ -49,7 +61,13 @@ async def run_pipeline(state: JobState) -> None:
     # Both only need (company, role) — inputs available from the start.
     # asyncio.gather runs both agents simultaneously.
     # Wall-clock time = max(research_time, people_time), not their sum.
-    prompt = f"Company: {state.company}\nRole: {state.role}"
+    prompt = (
+        f"Company: {state.company}\n"
+        f"Role: {state.role}\n"
+        f"Candidate location: {state.profile.location or 'not specified'}\n"
+        f"Previous employer: {state.profile.previous_company or 'not provided'}\n"
+        f"University: {state.profile.university or 'not provided'}"
+    )
     print(f"[orchestrator] running research + people-finding in parallel")
 
     try:
@@ -86,36 +104,26 @@ async def run_pipeline(state: JobState) -> None:
     except Exception:
         state.employees = []
 
-    # ── PATTERN 3: Human-in-the-loop ────────────────────────────────────────
-    # The pipeline SUSPENDS here. The frontend shows the research and contacts.
-    # The user reviews, edits if needed, then clicks Approve.
-    # POST /rows/{thread_id}/approve sets state.approved = True in the store.
-    # This polling loop re-reads the store every 2 seconds until approved.
-    #
-    # Why suspend instead of auto-draft? Because letting an agent send a message
-    # without human review is the most common mistake in agentic systems.
-    state.status = "awaiting_review"
-    update_state(state)
-    print(f"[orchestrator] waiting for human approval on thread {state.thread_id}")
-
-    while True:
-        await asyncio.sleep(2)
-        current = get_state(state.thread_id)
-        if current is None:
-            return
-        if current.approved:
-            state = current
-            break
-
-    # ── Resume after approval ────────────────────────────────────────────────
+    # ── PATTERN 3: Drafting ──────────────────────────────────────────────────
     state.status = "drafting"
     update_state(state)
 
     top_contact = state.employees[0] if state.employees else Employee(name="Hiring Manager", title="")
+    jd_resource = next((r for r in state.external_links if r.type == "jd"), None)
+
     draft_prompt = f"""Company overview: {state.company_overview}
 
 Target contact: {top_contact.name} — {top_contact.title}
 Role I'm targeting: {state.role}
+Job posting URL: {jd_resource.url if jd_resource else "(not found)"}
+
+Job description:
+{jd_resource.content if jd_resource and jd_resource.content else "(not available)"}
+
+About me:
+Name: {state.profile.name or "(not set)"}
+Current title: {state.profile.title or "(not set)"}
+Location: {state.profile.location or "(not set)"}
 
 My resume:
 {state.resume_text or "(no resume provided)"}"""

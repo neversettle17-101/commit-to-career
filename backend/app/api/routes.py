@@ -1,10 +1,12 @@
 import uuid
-from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from typing import Optional
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
 
 from backend.app.models.state import JobState
 from backend.app.store.sheet_store import add_state, get_all_states, approve
+from backend.app.store.profile_store import get_profile, update_profile, RESUME_PATH
 from backend.app.orchestrator import run_pipeline
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -38,3 +40,35 @@ def approve_row(thread_id: str):
     if not approve(thread_id):
         raise HTTPException(status_code=404, detail="Thread not found")
     return {"thread_id": thread_id, "approved": True}
+
+
+# ── Profile ───────────────────────────────────────────────────────────────────
+
+@router.get("/profile")
+def fetch_profile():
+    p = get_profile()
+    return {**p.model_dump(), "has_resume": p.has_resume}
+
+
+@router.post("/profile")
+async def save_profile(
+    name:             str = Form(""),
+    email:            str = Form(""),
+    title:            str = Form(""),
+    location:         str = Form(""),
+    previous_company: str = Form(""),
+    university:       str = Form(""),
+    resume: Optional[UploadFile] = File(None),
+):
+    resume_filename = ""
+    if resume and resume.filename:
+        contents = await resume.read()
+        RESUME_PATH.write_bytes(contents)
+        resume_filename = resume.filename
+
+    profile = update_profile(
+        name=name, email=email, title=title, location=location,
+        previous_company=previous_company, university=university,
+        resume_filename=resume_filename,
+    )
+    return {**profile.model_dump(), "has_resume": profile.has_resume}
