@@ -21,6 +21,13 @@ type Employee = {
   warm?:        boolean
 }
 
+type TraceEvent = {
+  ts:    string
+  agent: string
+  kind:  "start" | "tool_call" | "tool_result" | "finish" | "error"
+  data:  string
+}
+
 type Row = {
   thread_id:        string
   company:          string
@@ -32,6 +39,7 @@ type Row = {
   message:          string
   error:            string | null
   approved:         boolean
+  trace:            TraceEvent[]
 }
 
 // ── Status config ─────────────────────────────────────────────────────────────
@@ -100,6 +108,45 @@ function DotLoader() {
         <span key={d} style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B", display: "inline-block", animation: `bounce 1s ${d}ms ease-in-out infinite` }} />
       ))}
     </span>
+  )
+}
+
+// ── Trace panel ───────────────────────────────────────────────────────────────
+
+const TRACE_KIND: Record<string, { bg: string; color: string; label: string }> = {
+  start:       { bg: "#F5F4F0", color: "#78716C", label: "start"  },
+  tool_call:   { bg: "#EFF6FF", color: "#1D4ED8", label: "call"   },
+  tool_result: { bg: "#F5F4F0", color: "#57534E", label: "result" },
+  finish:      { bg: "#F0FDF4", color: "#166534", label: "done"   },
+  error:       { bg: "#FEF2F2", color: "#991B1B", label: "error"  },
+}
+
+function TracePanel({ events }: { events: TraceEvent[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 24, borderTop: "1px solid #F0EDE6", paddingTop: 16 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A" }}
+      >
+        <ChevronDown size={13} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+        Agent trace ({events.length} events)
+      </button>
+      {open && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+          {events.map((e, i) => {
+            const cfg = TRACE_KIND[e.kind] ?? TRACE_KIND.tool_result
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", background: cfg.bg, borderRadius: 8, padding: "6px 10px" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: cfg.color, textTransform: "uppercase", flexShrink: 0, marginTop: 1, minWidth: 44 }}>{cfg.label}</span>
+                <span style={{ fontSize: 10, color: "#A8A29E", flexShrink: 0, marginTop: 1 }}>{e.agent}</span>
+                <span style={{ fontSize: 12, color: "#44403C", fontFamily: "monospace", wordBreak: "break-all", lineHeight: 1.5 }}>{e.data}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -237,6 +284,9 @@ function DetailPanel({ row, onApprove }: { row: Row; onApprove: () => void }) {
             <span style={{ fontSize: 13, color: "#92400E" }}>Drafting your message…</span>
           </div>
         )}
+
+        {/* Trace */}
+        {row.trace?.length > 0 && <TracePanel events={row.trace} />}
 
       </div>
     </motion.div>

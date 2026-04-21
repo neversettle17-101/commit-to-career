@@ -232,28 +232,119 @@ A fully agentic system would have an LLM deciding the control flow too — e.g. 
 
 ---
 
-## 13. Pure Agent Strategy — An Alternative to Prescribed Search Order
+## 13. Pure Agent Strategy — Implemented
 
-**Current approach (structured agent):** System prompts prescribe the search order explicitly — "First call: X, Second call: Y." The LLM executes a recipe, not a plan.
+**The shift:** System prompts previously prescribed the exact search order — "First call: X, Second call: Y." The LLM was executing a recipe, not planning. This was a structured workflow dressed as an agent.
 
-**Pure agent approach:** Give the agent a goal and tools, no script:
-> "Your goal is to find hiring contacts at [company]. You have `web_search`. Use it however many times you need to build a confident list."
+**What changed:** Both `agents/researcher.py` and `agents/people.py` now give a goal and success criteria instead of a script. The LLM decides what to search, how many times, and when it has enough. The agent loop in `core/agent.py` required zero changes — it already supported arbitrary tool sequences.
 
-The LLM then plans its own strategy — it might search LinkedIn, see sparse results, pivot to GitHub to find engineers, cross-reference with a blog post. That's genuine planning, not recipe-following.
+**Why a goal prompt works:**
+- State what you need (company overview, job description, contacts)
+- State stop criteria ("stop when you have enough, don't over-search")
+- State output schema (what the JSON must look like)
+- Don't prescribe HOW to get there
 
-**What you'd change in code:** Strip the numbered search instructions from the system prompts in `agents/people.py` and `agents/researcher.py`. Replace with a goal statement and success criteria. The agent loop in `core/agent.py` requires zero changes — the loop already supports arbitrary tool call sequences.
+The LLM then plans its own path — if LinkedIn is sparse it might pivot to GitHub or a company blog. That's genuine planning.
 
 **The tradeoff:**
 
-| | Structured (current) | Pure agent |
+| | Structured (previous) | Pure agent (current) |
 |---|---|---|
 | Predictability | High — fixed search count | Variable — LLM decides |
-| Quality | Consistent but rigid | Adaptive, but model-dependent |
-| Debuggability | Easy — trace is predictable | Must read full message history |
+| Quality | Consistent but rigid | Adaptive, model-dependent |
+| Debuggability | Trace is predictable | Trace varies — use observability layer |
 | Token cost | Fixed | Variable |
 
-**The constraint:** Pure agent planning works well with frontier models (Claude, GPT-4o). With a mid-tier model like Llama 3.3 on Groq, removing scaffolding can cause looping or missed searches. To do this properly: switch to a stronger model and drop the prescribed order entirely.
+**The constraint:** Works best with frontier models (Claude, GPT-4o). Llama 3.3 on Groq is capable but may occasionally over-search or stop early. The trace (entry 14) lets you observe and diagnose this.
 
 **Concepts to read:**
 - Blog: [ReAct — Reasoning + Acting in LLMs](https://react-lm.github.io/) — the original paper on agents that plan their own tool-use steps
 - Blog: [Building effective agents — Anthropic](https://www.anthropic.com/research/building-effective-agents#agents) — when to use fully autonomous agents vs. structured workflows
+
+---
+
+## 14. Observability in Agentic Systems — Trace + Logging
+
+**Decision:** Added a `trace: list[TraceEvent]` field to `JobState` and `logging` to `core/agent.py`. Every tool call, tool result, agent start, finish, and error emits a `TraceEvent` (stored in state for the UI) and a `logging.info()` line (visible in the terminal).
+
+**Why two layers?**
+- **Structured trace in state** — persisted to SQLite, returned via `GET /rows`, rendered inline in the UI. Answers "what did the agent see and decide?" after the fact.
+- **Stdout logging** — real-time, visible while the pipeline runs, useful in production or when tailing server logs. Doesn't require opening the UI.
+
+**The instrumentation point:** `core/agent.py` is the single place where all tool calls happen. Emitting events there means every agent gets observability for free — no changes needed in `researcher.py`, `people.py`, or `drafter.py`.
+
+**The rule:** Instrument at the loop boundary, not inside individual agents. The loop is the common structure; agents are just different configurations of it.
+
+**Concepts to read:**
+- Blog: [Tracing LLM applications — Arize](https://arize.com/blog/llm-tracing/) — why traces matter more than logs for agentic systems
+- [OpenTelemetry for LLMs](https://opentelemetry.io/docs/) — the production standard for distributed tracing, applicable to agent pipelines
+- Blog: [LangSmith tracing](https://docs.smith.langchain.com/) — how a framework formalises exactly this pattern
+
+---
+
+## 15. ReAct Pattern — Reason + Act + Observe
+
+**What it is:** ReAct (Reasoning + Acting) is the pattern that makes an agent actually think before acting. Instead of calling tools blindly, the agent follows a loop:
+
+```
+Thought:  what do I need? why will this search help?
+Action:   call web_search(query)
+Observation: what did I find? do I have enough?
+Thought:  what's still missing?
+Action:   call web_search(different query)  ← only if needed
+...
+Final Answer: return the result
+```
+
+**Why it matters:** Without explicit reasoning, agents tend to over-call tools — they search 8 times when 3 would suffice, because nothing tells them to stop and assess. ReAct forces a self-evaluation step after every observation.
+
+**How it's implemented here:**
+- System prompts instruct the agent to follow Thought → Action → Observation explicitly
+- `msg.content` (the Thought) is kept in the message history alongside tool calls — the LLM builds on its own prior reasoning
+- `MAX_TOOL_CALLS = 5` in `core/agent.py` is the hard budget: when exhausted, tools are removed from the next call, forcing a final answer from whatever was gathered
+
+**Budget enforcement vs. prompt-only:**
+Telling the LLM "you have 5 searches" alone isn't enough — models sometimes ignore soft limits. The hard cap in the loop is the backstop: when `tool_calls_made >= MAX_TOOL_CALLS`, `kwargs["tools"]` is omitted, so the model *cannot* call another tool even if it wants to.
+
+**Interview talking point:** This is the difference between a loop that happens to use tools and an agent that reasons about its own actions. ReAct is the pattern behind OpenAI's function calling agents, LangChain's AgentExecutor, and LangGraph's ReAct node. The original paper: [ReAct: Synergizing Reasoning and Acting in Language Models](https://react-lm.github.io/) (Yao et al., 2022).
+
+**Concepts to read:**
+- Paper: [ReAct (Yao et al., 2022)](https://react-lm.github.io/)
+- Blog: [Building effective agents — Anthropic](https://www.anthropic.com/research/building-effective-agents) — how ReAct maps to production agentic patterns
+- Blog: [LangChain ReAct agent internals](https://python.langchain.com/docs/modules/agents/agent_types/react/) — how a framework formalises the same loop
+
+---
+
+## 16. Exponential Backoff with Jitter — Resilient Retries
+
+**The problem:** APIs (Groq, Tavily) return HTTP 429 when you exceed their rate limit. A naive retry immediately hits the same limit again. Retry after a fixed delay is better, but if many clients retry at the same time they all hit the server at once — the **thundering herd problem**.
+
+**The solution: exponential backoff with jitter**
+
+```python
+delay = BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
+# attempt 0 → ~2s, attempt 1 → ~4s, attempt 2 → ~8s
+```
+
+- **Exponential** — delay doubles each attempt, giving the server time to recover
+- **Jitter** — `random.uniform(0, 1)` adds up to 1s of randomness, spreading retries across time so multiple clients don't all retry at the same moment
+
+**Two separate retry helpers in `core/agent.py`:**
+
+| Helper | Where used | Sleep type | Why different |
+|---|---|---|---|
+| `_llm_call_with_backoff` | Groq API calls | `asyncio.sleep` | Async — doesn't block the event loop |
+| `_tool_call_with_backoff` | Tavily tool calls | `time.sleep` | Sync — Tavily client has no async API |
+
+Using `asyncio.sleep` in async code and `time.sleep` in sync code is not just style — using `time.sleep` inside a coroutine blocks the entire event loop, freezing all other async tasks.
+
+**Interview questions this covers:**
+- "How do you handle rate limits in production?" → exponential backoff + jitter, separate strategies for sync vs async
+- "What is the thundering herd problem?" → many clients retrying simultaneously overwhelm the server; jitter breaks the synchronisation
+- "Why not just retry immediately?" → you'd hit the same rate limit window; the server needs time to reset
+- "What's the difference between `time.sleep` and `asyncio.sleep`?" → `time.sleep` blocks the OS thread; `asyncio.sleep` yields control back to the event loop
+
+**Concepts to read:**
+- Blog: [Exponential Backoff and Jitter — AWS Architecture Blog](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/) — the canonical reference, written by AWS engineers who deal with this at scale
+- Docs: [Python asyncio — sleep](https://docs.python.org/3/library/asyncio-task.html#asyncio.sleep) — why `asyncio.sleep` is non-blocking
+- Blog: [Retry patterns — Microsoft Azure Architecture](https://learn.microsoft.com/en-us/azure/architecture/patterns/retry) — retry, circuit breaker, and when to use each

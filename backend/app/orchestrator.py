@@ -72,8 +72,8 @@ async def run_pipeline(state: JobState) -> None:
 
     try:
         research_output, people_output = await asyncio.gather(
-            researcher.run(prompt),
-            people_finder.run(prompt),
+            researcher.run(prompt, trace=state.trace),
+            people_finder.run(prompt, trace=state.trace),
         )
     except Exception as e:
         state.status = "error"
@@ -129,7 +129,7 @@ My resume:
 {state.resume_text or "(no resume provided)"}"""
 
     try:
-        state.message = await drafter.run(draft_prompt)
+        state.message = await drafter.run(draft_prompt, trace=state.trace)
         state.status = "done"
     except Exception as e:
         state.status = "error"

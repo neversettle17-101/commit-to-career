@@ -25,6 +25,13 @@ class Employee(BaseModel):
     warm: bool = False
 
 
+class TraceEvent(BaseModel):
+    ts: str     # ISO timestamp
+    agent: str  # which agent emitted this
+    kind: str   # "start" | "tool_call" | "tool_result" | "finish" | "error"
+    data: str   # query, result snippet, error message, or output summary
+
+
 class JobState(BaseModel):
     # ── Inputs ────────────────────────────────────────────────────────────────
     thread_id: str
@@ -44,6 +51,9 @@ class JobState(BaseModel):
     # ── Tags (queryable via Postgres GIN index) ───────────────────────────────
     # e.g. ["message_sent", "interview_scheduled", "fintech", "rejected"]
     tags: list[str] = Field(default_factory=list)
+
+    # ── Observability ─────────────────────────────────────────────────────────
+    trace: list[TraceEvent] = Field(default_factory=list)
 
     # ── Control flow ──────────────────────────────────────────────────────────
     # Valid values: pending | researching | finding_people |
