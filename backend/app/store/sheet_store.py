@@ -1,6 +1,6 @@
 from typing import Optional
 from backend.app.models.state import JobState
-from backend.app.store.db import upsert_job, get_job, get_all_jobs, update_job_status
+from backend.app.store.db import upsert_job, get_job, get_all_successful_jobs, update_job_status
 
 
 def _upsert(state: JobState) -> None:
@@ -28,7 +28,7 @@ def get_state(thread_id: str) -> Optional[JobState]:
 
 
 def get_all_states() -> list[JobState]:
-    return [JobState.model_validate_json(r) for r in get_all_jobs()]
+    return [JobState.model_validate_json(r) for r in get_all_successful_jobs()]
 
 
 def approve(thread_id: str) -> bool:

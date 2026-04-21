@@ -80,10 +80,10 @@ def get_job(thread_id: str) -> str | None:
     return psycopg2.extras.Json(row[0]) if row and row[0] else (str(row[0]) if row else None)
 
 
-def get_all_jobs() -> list[str]:
+def get_all_successful_jobs() -> list[str]:
     with _lock, _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT state_json FROM jobs ORDER BY updated_at DESC")
+            cur.execute("SELECT state_json FROM jobs WHERE status!='error' ORDER BY updated_at DESC")
             rows = cur.fetchall()
     import json
     return [json.dumps(r["state_json"]) for r in rows]
