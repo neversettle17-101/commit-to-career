@@ -1,9 +1,131 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, ChevronDown, ExternalLink, Copy, Check, Loader2 } from "lucide-react"
-import { fetchRows, createRow, approveRow, sendEmail } from "@/services/api"
+import { Plus, ChevronDown, ExternalLink, Copy, Check, Loader2, X } from "lucide-react"
+import { fetchRows, createRow, approveRow, sendEmail, fetchProfile, saveProfile } from "@/services/api"
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type Profile = {
+  name: string
+  email: string
+  title: string
+  location: string
+  previous_company: string
+  university: string
+  resume_filename: string
+  has_resume: boolean
+}
+
+// ── Profile field ─────────────────────────────────────────────────────────────
+
+const modalInputStyle: React.CSSProperties = { width: "100%", height: 40, padding: "0 12px", borderRadius: 10, border: "1.5px solid #E8E2D9", background: "#fff", fontSize: 14, color: "#1C1917", fontFamily: "inherit", boxSizing: "border-box", outline: "none", transition: "border-color 0.15s" }
+
+function ProfileField({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string }) {
+  return (
+    <div>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A", marginBottom: 6 }}>{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={modalInputStyle}
+        onFocus={e => e.currentTarget.style.borderColor = "#F59E0B"}
+        onBlur={e  => e.currentTarget.style.borderColor = "#E8E2D9"}
+      />
+    </div>
+  )
+}
+
+// ── User details modal ────────────────────────────────────────────────────────
+
+function UserDetailsModal({ onClose, onSaved }: { onClose: () => void; onSaved: (p: Profile) => void }) {
+  const [profile, setProfile] = useState<Profile>({ name: "", email: "", title: "", location: "", previous_company: "", university: "", resume_filename: "", has_resume: false })
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState("")
+
+  useEffect(() => {
+    fetchProfile().then(setProfile).catch(() => {})
+  }, [])
+
+  async function handleSave() {
+    if (!profile.name.trim() || !profile.email.trim()) {
+      setError("Name and email are required.")
+      return
+    }
+    setSaving(true)
+    setError("")
+    try {
+      const updated = await saveProfile({ name: profile.name, email: profile.email, title: profile.title, location: profile.location, previous_company: profile.previous_company, university: profile.university })
+      onSaved(updated)
+    } catch {
+      setError("Failed to save. Please try again.")
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      {/* Backdrop */}
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(28,25,23,0.4)", backdropFilter: "blur(2px)" }} />
+
+      {/* Dialog */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+        style={{ position: "relative", background: "#fff", borderRadius: 20, border: "1px solid #F0EDE6", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", width: "100%", maxWidth: 480, padding: 32, fontFamily: "'DM Sans', sans-serif" }}
+      >
+        <button
+          onClick={onClose}
+          style={{ position: "absolute", top: 16, right: 16, background: "none", border: "none", cursor: "pointer", color: "#C4B89A", padding: 4, borderRadius: 6, display: "flex" }}
+        >
+          <X size={16} />
+        </button>
+
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontFamily: "'DM Serif Display', Georgia, serif", fontSize: 24, fontWeight: 400, color: "#1C1917", margin: "0 0 6px" }}>
+            Tell us about yourself
+          </h2>
+          <p style={{ fontSize: 13, color: "#A8A29E", margin: 0 }}>
+            Your details personalise every outreach message. Name and email are required.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <ProfileField label="Full name *"      value={profile.name}             onChange={v => setProfile(p => ({ ...p, name: v }))}             placeholder="Ada Lovelace" />
+          <ProfileField label="Email *"          value={profile.email}            onChange={v => setProfile(p => ({ ...p, email: v }))}            placeholder="ada@example.com" type="email" />
+          <ProfileField label="Current title"    value={profile.title}            onChange={v => setProfile(p => ({ ...p, title: v }))}            placeholder="Software Engineer" />
+          <ProfileField label="Location"         value={profile.location}         onChange={v => setProfile(p => ({ ...p, location: v }))}         placeholder="San Francisco, CA" />
+          <ProfileField label="Previous company" value={profile.previous_company} onChange={v => setProfile(p => ({ ...p, previous_company: v }))} placeholder="Google, Stripe, …" />
+          <ProfileField label="University"       value={profile.university}       onChange={v => setProfile(p => ({ ...p, university: v }))}       placeholder="MIT, Stanford, …" />
+
+          {error && (
+            <p style={{ fontSize: 12, color: "#991B1B", margin: 0 }}>{error}</p>
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button
+              onClick={onClose}
+              style={{ flex: 1, height: 42, borderRadius: 12, border: "1.5px solid #E8E2D9", background: "#fff", color: "#78716C", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              Skip for now
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{ flex: 2, height: 42, borderRadius: 12, border: "none", background: "#1C1917", color: "#fff", fontSize: 14, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: saving ? 0.7 : 1 }}
+            >
+              {saving ? "Saving…" : "Save & continue"}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -346,12 +468,25 @@ function DetailPanel({ row, onApprove, onSend }: { row: Row; onApprove: () => vo
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CompanySheet() {
-  const [rows,       setRows]       = useState<Row[]>([])
-  const [company,    setCompany]    = useState("")
-  const [role,       setRole]       = useState("")
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [adding,     setAdding]     = useState(false)
-  const [approving,  setApproving]  = useState<string | null>(null)
+  const [rows,        setRows]        = useState<Row[]>([])
+  const [company,     setCompany]     = useState("")
+  const [role,        setRole]        = useState("")
+  const [expandedId,  setExpandedId]  = useState<string | null>(null)
+  const [adding,      setAdding]      = useState(false)
+  const [approving,   setApproving]   = useState<string | null>(null)
+  const [profile,     setProfile]     = useState<Profile | null>(null)
+  const [showModal,   setShowModal]   = useState(false)
+  const profileChecked = useRef(false)
+
+  function isProfileIncomplete(p: Profile | null) {
+    return !p || !p.name.trim() || !p.email.trim()
+  }
+
+  function handleCompanyFocus() {
+    if (!profileChecked.current && isProfileIncomplete(profile)) {
+      setShowModal(true)
+    }
+  }
 
   async function handleApprove(threadId: string) {
     setApproving(threadId)
@@ -373,6 +508,9 @@ export default function CompanySheet() {
   useEffect(() => {
     loadRows()
     const iv = setInterval(loadRows, 3000)
+    fetchProfile()
+      .then(p => setProfile(p))
+      .catch(() => {})
     return () => clearInterval(iv)
   }, [])
 
@@ -393,6 +531,16 @@ export default function CompanySheet() {
 
   return (
     <>
+      {/* User details modal */}
+      <AnimatePresence>
+        {showModal && (
+          <UserDetailsModal
+            onClose={() => { setShowModal(false); profileChecked.current = true }}
+            onSaved={p  => { setProfile(p); setShowModal(false); profileChecked.current = true }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Keyframe animations — injected once */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap');
@@ -419,20 +567,24 @@ export default function CompanySheet() {
 
           {/* Inputs */}
           <div style={{ display: "flex", gap: 8, marginBottom: 40 }}>
-            {[
-              { value: company, set: setCompany, placeholder: "Company name", flex: 1 },
-              { value: role,    set: setRole,    placeholder: "Role (optional)", flex: "0 0 200px" },
-            ].map(({ value, set, placeholder, flex }, i) => (
-              <input key={i}
-                value={value}
-                onChange={e => set(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && addRow()}
-                placeholder={placeholder}
-                style={{ flex, height: 44, padding: "0 16px", borderRadius: 12, border: "1.5px solid #E8E2D9", background: "#fff", fontSize: 14, color: "#1C1917", fontFamily: "inherit", transition: "border-color 0.15s" }}
-                onFocus={e => e.currentTarget.style.borderColor = "#F59E0B"}
-                onBlur={e  => e.currentTarget.style.borderColor = "#E8E2D9"}
-              />
-            ))}
+            <input
+              value={company}
+              onChange={e => setCompany(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addRow()}
+              onFocus={e => { handleCompanyFocus(); e.currentTarget.style.borderColor = "#F59E0B" }}
+              onBlur={e  => e.currentTarget.style.borderColor = "#E8E2D9"}
+              placeholder="Company name"
+              style={{ flex: 1, height: 44, padding: "0 16px", borderRadius: 12, border: "1.5px solid #E8E2D9", background: "#fff", fontSize: 14, color: "#1C1917", fontFamily: "inherit", transition: "border-color 0.15s" }}
+            />
+            <input
+              value={role}
+              onChange={e => setRole(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addRow()}
+              placeholder="Role (optional)"
+              style={{ flex: "0 0 200px", height: 44, padding: "0 16px", borderRadius: 12, border: "1.5px solid #E8E2D9", background: "#fff", fontSize: 14, color: "#1C1917", fontFamily: "inherit", transition: "border-color 0.15s" }}
+              onFocus={e => e.currentTarget.style.borderColor = "#F59E0B"}
+              onBlur={e  => e.currentTarget.style.borderColor = "#E8E2D9"}
+            />
             <button onClick={addRow} disabled={adding || !company.trim()}
               style={{ height: 44, padding: "0 20px", borderRadius: 12, border: "none", background: company.trim() ? "#1C1917" : "#E8E2D9", color: company.trim() ? "#fff" : "#A8A29E", fontSize: 14, fontWeight: 600, cursor: company.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s", fontFamily: "inherit" }}>
               {adding ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <><Plus size={15} /> Add</>}
