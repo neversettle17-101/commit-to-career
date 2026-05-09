@@ -35,6 +35,7 @@ type Row = {
   status:           string
   company_overview: string
   external_links:   Resource[]
+  job_openings:     Resource[]
   employees:        Employee[]
   message:          string
   contact_email:    string
@@ -240,21 +241,23 @@ function DetailPanel({ row, onApprove, onSend }: { row: Row; onApprove: () => vo
           </div>
         )}
 
-        {/* Job posting link */}
-        {(() => {
-          const jd = row.external_links?.find(l => l.type === "jd")
-          if (!jd) return null
-          return (
-            <div style={{ marginBottom: 24 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A", marginBottom: 10 }}>Job posting</p>
-              <a href={jd.url} target="_blank" rel="noreferrer"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#D97706", textDecoration: "none", fontWeight: 500 }}>
-                <ExternalLink size={13} />
-                {jd.name}
-              </a>
+        {/* Job openings */}
+        {row.job_openings?.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#C4B89A", marginBottom: 10 }}>
+              Job openings ({row.job_openings.length})
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {row.job_openings.map((jd, i) => (
+                <a key={i} href={jd.url} target="_blank" rel="noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#D97706", textDecoration: "none", fontWeight: 500 }}>
+                  <ExternalLink size={13} style={{ flexShrink: 0 }} />
+                  <span>{jd.name}</span>
+                </a>
+              ))}
             </div>
-          )
-        })()}
+          </div>
+        )}
 
         {/* Approve gate */}
         {row.status === "awaiting_review" && (

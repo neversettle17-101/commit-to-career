@@ -45,6 +45,7 @@ class JobState(BaseModel):
     # ── Filled in by agents ───────────────────────────────────────────────────
     company_overview: str = ""
     external_links: list[Resource] = Field(default_factory=list)
+    job_openings: list[Resource] = Field(default_factory=list)
     employees: list[Employee] = Field(default_factory=list)
     message: str = ""
 

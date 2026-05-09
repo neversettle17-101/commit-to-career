@@ -26,7 +26,7 @@ def load_resume() -> str:
 
 def _extract_domain(state: JobState, contact: Employee) -> str:
     """Try JD URL first, fall back to company name heuristic."""
-    jd = next((r for r in state.external_links if r.type == "jd"), None)
+    jd = state.job_openings[0] if state.job_openings else None
     if jd and jd.url:
         from urllib.parse import urlparse
         host = urlparse(jd.url).netloc
@@ -106,10 +106,18 @@ async def run_pipeline(state: JobState) -> None:
         state.company_overview = research_data.get("company_overview", "")
         raw_links = research_data.get("external_links", [])
         state.external_links = [Resource(**l) for l in raw_links if isinstance(l, dict)]
+        raw_jobs = research_data.get("job_openings", [])
+        state.job_openings = [Resource(**j) for j in raw_jobs if isinstance(j, dict)]
+        # Fallback: if researcher put jd entries in external_links, migrate them
+        if not state.job_openings:
+            jd_links = [l for l in state.external_links if l.type == "jd"]
+            state.external_links = [l for l in state.external_links if l.type != "jd"]
+            state.job_openings = jd_links
     except Exception:
         # Agent returned non-JSON — use raw text as overview, no links
         state.company_overview = research_output
         state.external_links = []
+        state.job_openings = []
 
     # Parse people output
     try:
@@ -123,7 +131,7 @@ async def run_pipeline(state: JobState) -> None:
     update_state(state)
 
     top_contact = state.employees[0] if state.employees else Employee(name="Hiring Manager", title="")
-    jd_resource = next((r for r in state.external_links if r.type == "jd"), None)
+    jd_resource = state.job_openings[0] if state.job_openings else None
 
     draft_prompt = f"""Company overview: {state.company_overview}
 
